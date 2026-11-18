@@ -1445,7 +1445,15 @@ window.__ModuleLoader__.load({
      * Range across renders: the DOM is rebuilt only when the page or its text
      * changes from outside, and rebuilt content restores the caret from `offset`.
      */
-    function makeEditor(pageId, note, t) {
+    /** Latest state of one page, or undefined when it no longer exists. */
+    function liveNote(pageId) {
+      return state.notes.find((item) => item.id === pageId)
+    }
+
+    function makeEditor(pageId, initial, t) {
+      // The store replaces `notes` on every edit, so a captured page object goes
+      // stale immediately. Always read through liveNote().
+      let note = initial
       const ref = { current: null }
       /** Caret offset within the page's stored text (0..text.length). */
       const caret = { offset: note.text.length }
@@ -1486,6 +1494,7 @@ window.__ModuleLoader__.load({
 
       /** Build the DOM for a page, restoring the caret if we own the focus. */
       function paint(entry) {
+        note = liveNote(pageId) ?? entry ?? note
         const root = ref.current
         if (!root) return
         rebuilding = true
@@ -1576,6 +1585,7 @@ window.__ModuleLoader__.load({
 
       /** Selection → stored-text offset. Images count as one character. */
       function readCaret() {
+        note = liveNote(pageId) ?? note
         const root = ref.current
         const sel = window.getSelection && window.getSelection()
         if (!root || !sel || sel.rangeCount === 0) return caret.offset
@@ -1601,6 +1611,11 @@ window.__ModuleLoader__.load({
           }
           if (node.nodeType !== 1) return
           if (node.hasAttribute && node.hasAttribute('data-img-index')) {
+            offset += 1
+            return
+          }
+          // A <br> is one "\n" in readDom, so it counts as one caret character.
+          if (node.tagName === 'BR') {
             offset += 1
             return
           }
@@ -1663,6 +1678,7 @@ window.__ModuleLoader__.load({
       }
 
       const onInput = () => {
+        note = liveNote(pageId) ?? note
         if (rebuilding) return
         caret.offset = readCaret()
         const text = readDom()
@@ -1672,6 +1688,7 @@ window.__ModuleLoader__.load({
 
       /** Paste: an image goes in at the caret; text pastes as plain text. */
       const onPaste = (event) => {
+        note = liveNote(pageId) ?? note
         const files = imageFilesOf(event.clipboardData)
         if (files.length > 0) {
           event.preventDefault()
@@ -1691,6 +1708,7 @@ window.__ModuleLoader__.load({
       }
 
       const onKeyDown = (event) => {
+        note = liveNote(pageId) ?? note
         if (selected && (event.key === 'Backspace' || event.key === 'Delete')) {
           event.preventDefault()
           deleteSelected()

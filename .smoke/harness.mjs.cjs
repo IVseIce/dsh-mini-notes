@@ -498,15 +498,24 @@ function draw() {
   return { button: buttonUi.tree, panel: panelUi.tree }
 }
 
-/** Simulate typing: replace the editor's text nodes, then fire input. */
+/** Simulate typing: replace the editor's text nodes, put the caret at the end, fire input. */
 const typeInto = (editor, value) => {
   editor.children = []
   const parts = String(value).split('\n')
+  let lastText = null
   parts.forEach((line, index) => {
     if (index > 0) editor.appendChild(new El('br'))
-    if (line !== '') editor.appendChild(new TextNode(line))
+    if (line !== '') {
+      lastText = new TextNode(line)
+      editor.appendChild(lastText)
+    }
   })
-  setSelection(document.createRange())
+  // A real browser leaves the caret after the last typed character.
+  const range = document.createRange()
+  if (lastText) range.setStart(lastText, lastText.nodeValue.length)
+  else range.selectNodeContents(editor)
+  range.collapse(true)
+  setSelection(range)
   editor.listeners.input[0]({})
 }
 
@@ -876,6 +885,48 @@ const byClass = (root, cls) => {
     await settled()
     saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
     assert.ok(saved.zoom < 1, 'zoom is persisted')
+  }
+
+  // Regression: Enter must insert a line break, not truncate the page.
+  // The editor originally captured a page snapshot at build time, so the second
+  // edit was computed against stale text and the current line got overwritten.
+  {
+    storage.set('dsh-mini-notes.v2', JSON.stringify({
+      v: 2, notes: [{ id: 1, text: '', images: [] }], activeId: 1, seq: 1,
+      open: true, pinned: true, box: { x: 40, y: 60, w: 400, h: 460 },
+      trash: [], view: 'note', zoom: 1
+    }))
+    const enterUi = loadFresh()
+    const ed = enterUi.panel.querySelector('.mn-editor')
+
+    // type the first line
+    typeInto(ed, '第一行')
+    await settled()
+    let st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st.notes[0].text, '第一行', 'first line typed')
+
+    // press Enter -> a newline is appended
+    ed.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
+    await settled()
+    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st.notes[0].text, '第一行\n', `Enter adds a newline (got ${JSON.stringify(st.notes[0].text)})`)
+
+    // Second line typed into the SAME editor instance (no remount), then another
+    // Enter. This is where the original bug lived: the editor's captured page
+    // snapshot was stale, so text was spliced into old content and overwritten.
+    typeInto(ed, '第一行\n第二行')
+    await settled()
+    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st.notes[0].text, '第一行\n第二行', 'second line kept the first')
+
+    ed.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
+    await settled()
+    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(
+      st.notes[0].text,
+      '第一行\n第二行\n',
+      `second Enter on the same editor keeps both lines (got ${JSON.stringify(st.notes[0].text)})`
+    )
   }
 
   // Regression: a page with an inline image must render it on reload.
