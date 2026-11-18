@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DSH Web 界面里的一个小记事本：会话标题栏右上角一个按钮，面板从按钮下方展开，随手记一笔。像 Windows 记事本 —— 无格式、无菜单、自动保存。
+DSH Web 界面里的一个小记事本：会话标题栏右上角一个按钮，面板从按钮下方展开，随手记一笔。像 Windows 记事本 —— 纯文本、无格式、无菜单、自动保存。
 
 纯客户端插件，无依赖、无构建、无网络请求、不注册工具。
 
@@ -47,15 +47,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-mini-notes
 - 标签上的 × 是「关闭这一页」，它会**进回收站**，而不是销毁。
 
 ### 缩放
-工具区的 `−` / 百分比 / `+`：整体缩放正文与图片（70%–250%），点百分比回到 100%。标签栏、底栏等窗口 chrome 不跟着缩放。缩放值会被记住。
-
-### 图片
-- 两种放入方式：**直接拖进面板**，或在正文里**粘贴**。图片插在光标处，按原始比例显示 —— 默认宽度取 `min(面板宽 − 48, 1600px)`，最宽 520px，所以截图里的字能直接读出来。
-- **拖动图片左右边缘可缩放**（60px 到面板宽 − 40）。原始像素不变，放大不模糊，也不动光标。
-- **点一下图片是选中**（蓝色描边），按 `Backspace` 或 `Delete` 删除；点别处或 `Esc` 取消选中。
-- 放入时自动压缩：最长边 1600px、WebP 0.82 质量，截图通常 100–300KB。
-- `localStorage` 约 5MB，大致可放 15–25 张。空间不足时底栏红字提示「图片太大，未能保存」，不会静默丢图。
-- 图片按页归属：关页进回收站时图片跟着走，恢复后仍在；彻底删除该页或清空回收站时才释放字节。
+工具区的 `−` / 百分比 / `+`：整体缩放正文（70%–250%），点百分比回到 100%。标签栏、底栏等窗口 chrome 不跟着缩放。缩放值会被记住。
 
 ### 回收站
 工具区的垃圾桶图标。
@@ -71,17 +63,12 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-mini-notes
 - 纯客户端。Host 半边（`index.js`）是一个空的 `apply`。
 - 一个模块级 store（`state` 对象 + 一个 `Set` 监听器）配 `useSyncExternalStore`；写入防抖 300ms，收起面板与 `pagehide` 时立即落盘。
 - 页面、回收站、视图、缩放全在**同一个 JSON 对象**里，一次写入落全。
-- **图片字节不在这个对象里。** 页面只记 `{ id, w, h, dw }`，字节单独存 `dsh-mini-notes.img.<id>`。所以打字永远只重写几百字节，而不是几 MB。data URL 在内存里另有一层缓存，渲染不碰存储。
-- **正文是 `contenteditable` 文档编辑器，但存储是纯文本。** 一张图恰好占一个占位字符（`\uFFFC`），`images` 数组按文档顺序描述它们。存下来没有 HTML、正文里没有 base64、没有 XSS 面 —— 加载时按标记重建 DOM。
-- **光标只跟踪一个文本偏移量**，跨渲染不保留 DOM Range。只有当 DOM 真的与存储不一致时才重建；拖图片边缘只改数字，完全不碰 DOM。
 - 两个槽位：`conversation.session.header.utilities`（按钮）、`shell.overlay`（面板）。收起时面板组件返回 `null`，不产生 DOM 与渲染；按钮只订阅一个布尔值。
 - 样式只用主题 token（`--dsw-alias-*`、`--dsw-radius-*`、`--dsw-elevation-*`），跟随亮/暗色。
 
 ### 已知限制
 
-- 只做「文字 + 行内图」，没有加粗、列表、标题等富文本格式。
-- 图片受 `localStorage` 约 5MB 限制；更多或更大的图片需要换 IndexedDB。
-- 图片是块级元素：插入在光标处，但独占一行。
+- 纯文本：没有图片，也没有加粗、列表、标题等富文本格式。
 
 ## 文件
 
@@ -90,7 +77,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-mini-notes
 | `package.json` | 包清单；通过 `dsh.bundle.patch` 和 `dsh.client` 声明双半 |
 | `cordis.patch.yml` | 插入一行 Host 插件（唯一作用是把包挂进组合） |
 | `index.js` | Host 半边：空实现 |
-| `client.js` | 浏览器半边：store、按钮、面板、编辑器、样式、槽位注册 |
+| `client.js` | 浏览器半边：store、按钮、面板、样式、槽位注册 |
 | `locale/{zh,en}.json` | 插件管理页的标题与描述 |
 | `icon.svg` | 插件图标 |
 | `.smoke/harness.mjs.cjs` | 离线行为自检（假 DOM + 假 React，不是真浏览器） |
@@ -105,7 +92,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-mini-notes
 node .smoke/harness.mjs.cjs client.js
 ```
 
-它会用假的 DOM、React 和存储驱动真实客户端代码，覆盖展开、输入、标签、拖拽排序、图片、缩放、回收站和重载。这是行为检查，不是浏览器测试。
+它会用假的 DOM、React 和存储驱动真实客户端代码，覆盖展开、输入、回车、标签、拖拽排序、缩放、回收站和重载。这是行为检查，不是浏览器测试。
 
 ## 许可证
 

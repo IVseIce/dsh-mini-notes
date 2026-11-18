@@ -1,9 +1,9 @@
 {
   "name": "dsh-mini-notes",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": false,
   "type": "module",
-  "description": "极简便签：会话标题栏一键展开的记事本，多页便签、行内图片（拖入/粘贴）、标签拖拽排序、整体缩放、回收站。纯客户端，无依赖。",
+  "description": "极简便签：会话标题栏一键展开的记事本，多页便签、标签拖拽排序、整体缩放、回收站。纯文本，纯客户端，无依赖。",
   "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",

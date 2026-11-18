@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Mini Notes",
-    "description": "A notepad opened from the session header: multiple pages, inline images by drag or paste, draggable tabs, whole-page zoom, and a trash. Pure client-side, no dependencies."
+    "description": "A notepad opened from the session header: multiple pages, draggable tabs, whole-page zoom, and a trash. Plain text, pure client-side, no dependencies."
   }
 }

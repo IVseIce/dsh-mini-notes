@@ -133,6 +133,7 @@ class El {
   }
   focus() {
     this.focused = true
+    document.activeElement = this
   }
   getContext() {
     return { drawImage() {} }
@@ -159,7 +160,7 @@ class El {
         return node.dataset.pluginCss === want
       }
       if (selector === 'textarea') return node.tagName === 'TEXTAREA'
-      if (selector === '.mn-editor') return (node.attrs.class || '').split(' ').includes('mn-editor')
+      if (selector === '.mn-text') return (node.attrs.class || '').split(' ').includes('mn-text')
       if (selector.startsWith('.')) {
         return (node.attrs.class || '').split(' ').includes(selector.slice(1))
       }
@@ -184,6 +185,7 @@ class El {
 
 const documentListeners = {}
 const document = new El('#document')
+document.activeElement = null
 document.head = new El('head')
 document.body = new El('body')
 document.documentElement = new El('html')
@@ -205,6 +207,7 @@ document.createRange = () => {
     setStartBefore(node) {
       range.startContainer = node.parent || document.body
       range.startOffset = (range.startContainer.children || []).indexOf(node)
+      range.beforeNode = node
     },
     collapse() {
       range.collapsed = true
@@ -498,25 +501,18 @@ function draw() {
   return { button: buttonUi.tree, panel: panelUi.tree }
 }
 
-/** Simulate typing: replace the editor's text nodes, put the caret at the end, fire input. */
-const typeInto = (editor, value) => {
-  editor.children = []
-  const parts = String(value).split('\n')
-  let lastText = null
-  parts.forEach((line, index) => {
-    if (index > 0) editor.appendChild(new El('br'))
-    if (line !== '') {
-      lastText = new TextNode(line)
-      editor.appendChild(lastText)
-    }
-  })
-  // A real browser leaves the caret after the last typed character.
-  const range = document.createRange()
-  if (lastText) range.setStart(lastText, lastText.nodeValue.length)
-  else range.selectNodeContents(editor)
-  range.collapse(true)
-  setSelection(range)
-  editor.listeners.input[0]({})
+/** Simulate typing into the textarea: set its value, then fire `change`. */
+const typeInto = (area, value) => {
+  area.value = value
+  area.listeners.change[0]({ target: { value } })
+}
+
+/** Simulate Enter inside a textarea: the browser edits `value`, fires `change`. */
+const pressEnter = (area) => {
+  const at = typeof area.selectionStart === 'number' ? area.selectionStart : area.value.length
+  const value = `${area.value.slice(0, at)}\n${area.value.slice(at)}`
+  area.value = value
+  area.listeners.change[0]({ target: { value } })
 }
 
 const pick = (root, label) => {
@@ -563,7 +559,7 @@ const byClass = (root, cls) => {
 
   let tabs = byClass(ui.panel, 'mn-tab')
   assert.strictEqual(tabs.length, 1, 'one tab created on first open')
-  assert.ok(ui.panel.querySelector('.mn-editor'), 'editor exists')
+  assert.ok(ui.panel.querySelector('.mn-text'), 'textarea exists')
 
   // Layout invariants that keep "+" reachable with many tabs.
   const strip = byClass(ui.panel, 'mn-tabs')[0]
@@ -577,7 +573,7 @@ const byClass = (root, cls) => {
   assert.strictEqual(byClass(ui.panel, 'mn-zoom-btn').length, 3, 'zoom has -, %, +')
 
   // -------------------------------------------------------------------- typing
-  typeInto(ui.panel.querySelector('.mn-editor'), '会议纪要\n第二行')
+  typeInto(ui.panel.querySelector('.mn-text'), '会议纪要\n第二行')
   await settled()
   let saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
   assert.strictEqual(saved.notes[0].text, '会议纪要\n第二行')
@@ -594,12 +590,12 @@ const byClass = (root, cls) => {
   tabs = byClass(ui.panel, 'mn-tab')
   assert.strictEqual(tabs.length, 2, 'second page added')
   assert.strictEqual(tabs[1].attrs['data-active'], '1', 'new page becomes active')
-  typeInto(ui.panel.querySelector('.mn-editor'), '第二页内容')
+  typeInto(ui.panel.querySelector('.mn-text'), '第二页内容')
   await settled()
 
   byClass(ui.panel, 'mn-tab')[0].listeners.click[0]()
   ui = draw()
-  assert.strictEqual(ui.panel.querySelector('.mn-editor').textContent, '会议纪要\n第二行', 'page 1 text preserved')
+  assert.strictEqual(ui.panel.querySelector('.mn-text').value, '会议纪要\n第二行', 'page 1 text preserved')
   assert.strictEqual(byClass(ui.panel, 'mn-tab')[0].attrs['data-active'], '1', 'page 1 active again')
 
   // ------------------------------------------------------------ tab reordering
@@ -797,196 +793,42 @@ const byClass = (root, cls) => {
   assert.strictEqual(confirmCalled, 0, 'no browser confirm was ever used')
   assert.ok(ui.panel.querySelector('.mn-trash-empty'), 'empty state shown')
 
-  // ------------------------------------------------------------------ images
-  {
-    // Start from a clean single page on the note view.
-    storage.set('dsh-mini-notes.v2', JSON.stringify({
-      v: 2, notes: [{ id: 1, text: 'x', images: [] }], activeId: 1, seq: 1,
-      open: true, pinned: true, box: { x: 40, y: 60, w: 400, h: 460 }, trash: [], view: 'note'
-    }))
-    const imgUi = loadFresh()
-    assert.strictEqual(byClass(imgUi.panel, 'mn-fig').length, 0, 'no inline image initially')
-
-    const file = { type: 'image/png', name: 'a.png' }
-    const ed = imgUi.panel.querySelector('.mn-editor')
-    ed.listeners.paste[0]({
-      clipboardData: { files: [file], items: [] },
-      preventDefault() {}
-    })
-    await settled()
-    const afterPaste = { panel: mount(registered.get('mini-notes-layer').component).tree }
-    const figs = () => byClass(afterPaste.panel, 'mn-fig')
-    assert.strictEqual(figs().length, 1, 'pasted image becomes an inline figure')
-    saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(saved.notes[0].images.length, 1, 'image recorded on the page')
-    assert.ok(saved.notes[0].text.includes('\uFFFC'), 'text carries a placeholder char where the image sits')
-    assert.strictEqual(saved.notes[0].text.replace(/\uFFFC/g, ''), 'x', 'the existing text is preserved')
-    const caretIndex = saved.notes[0].text.indexOf('\uFFFC')
-    assert.strictEqual(caretIndex, 1, 'placeholder landed at the caret, after the text')
-    const imageId = saved.notes[0].images[0].id
-    assert.ok(storage.get(`dsh-mini-notes.img.${imageId}`).startsWith('data:image/'), 'bytes stored separately')
-    assert.ok(!storage.get('dsh-mini-notes.v2').includes('base64'), 'page JSON stays free of image bytes')
-    assert.strictEqual(saved.notes[0].images[0].w, 1600, 'downscaled to the 1600px cap')
-    assert.strictEqual(saved.notes[0].images[0].h, 900)
-
-    // The inline image renders at a readable width, not a 64px thumbnail.
-    const fig = figs()[0]
-    const shownWidth = Number(String(fig.style.width).replace('px', ''))
-    assert.ok(shownWidth >= 160, `inline image is readable (got ${shownWidth}px)`)
-    assert.ok(fig.children.some((c) => c.tagName === 'IMG'), 'figure holds the img')
-
-    // Resizing by the right edge only changes the stored display width.
-    const rightGrip = byClass(fig, 'mn-fig-grip-right')[0]
-    assert.ok(rightGrip, 'right edge has a resize grip')
-    fig._box = { left: 0, top: 0, width: shownWidth, height: 200, right: shownWidth, bottom: 200 }
-    const listeners = []
-    windowStub.addEventListener = (type, fn) => listeners.push({ type, fn })
-    windowStub.removeEventListener = () => {}
-    rightGrip.listeners.pointerdown[0]({ clientX: 400, preventDefault() {}, stopPropagation() {}, currentTarget: rightGrip })
-    const moveFn = listeners.find((l) => l.type === 'pointermove').fn
-    const upFn = listeners.find((l) => l.type === 'pointerup').fn
-    moveFn({ clientX: 460 })
-    upFn({ clientX: 460 })
-    await settled()
-    saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    const dw = saved.notes[0].images[0].dw
-    assert.ok(dw > shownWidth, `drag widened the image (${shownWidth} -> ${dw})`)
-    assert.ok(saved.notes[0].text.includes('\uFFFC'), 'resizing leaves the text untouched')
-
-    // Clicking an inline image selects it (no zoom); Backspace deletes it.
-    let panelTree = mount(registered.get('mini-notes-layer').component).tree
-    let figNow = byClass(panelTree, 'mn-fig')[0]
-    const imgEl = figNow.children.find((c) => c.tagName === 'IMG')
-    imgEl.listeners.mousedown[0]({ preventDefault() {}, target: imgEl })
-    assert.strictEqual(figNow.attrs['data-selected'], '1', 'clicking the image selects it')
-    panelTree.querySelector('.mn-editor').listeners.keydown[0]({ key: 'Backspace', preventDefault() {} })
-    const afterDelete = { panel: mount(registered.get('mini-notes-layer').component).tree }
-    await settled()
-    assert.strictEqual(byClass(afterDelete.panel, 'mn-fig').length, 0, 'Backspace deletes the selected image')
-    saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(saved.notes[0].images.length, 0, 'image removed from the page')
-    assert.ok(!saved.notes[0].text.includes('\uFFFC'), 'its placeholder went with it')
-    assert.strictEqual(storage.get(`dsh-mini-notes.img.${imageId}`), undefined, 'image bytes released')
-
-    // Whole-page zoom: text and images scale, chrome does not.
-    const zoomUi = mount(registered.get('mini-notes-layer').component).tree
-    const zoomBtns = byClass(zoomUi, 'mn-zoom-btn')
-    assert.strictEqual(zoomBtns.length, 3, 'zoom has -, %, +')
-    assert.strictEqual(zoomUi.style['--mn-zoom'], '1', 'default zoom is 1')
-    zoomBtns[2].listeners.click[0]() // +
-    let zoomed = mount(registered.get('mini-notes-layer').component).tree
-    assert.strictEqual(zoomed.style['--mn-zoom'], '1.1', 'zoom in raises the scale')
-    byClass(zoomed, 'mn-zoom-btn')[1].listeners.click[0]() // the % resets
-    zoomed = mount(registered.get('mini-notes-layer').component).tree
-    assert.strictEqual(zoomed.style['--mn-zoom'], '1', 'clicking the percentage resets')
-    byClass(zoomed, 'mn-zoom-btn')[0].listeners.click[0]() // -
-    zoomed = mount(registered.get('mini-notes-layer').component).tree
-    assert.ok(Number(zoomed.style['--mn-zoom']) < 1, 'zoom out lowers the scale')
-    await settled()
-    saved = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.ok(saved.zoom < 1, 'zoom is persisted')
-  }
-
-  // Regression: after an image update (which repaints the editor), one Enter
-  // must still produce one newline. The original readDom() trimmed a trailing
-  // "\n", so the stored text and the DOM disagreed forever, and the Enter that
-  // produced the newline was immediately undone — users had to press it twice.
+  // Regression: typing then pressing Enter must add exactly one newline, and do
+  // it on the FIRST press. A textarea owns its own newlines, so nothing here may
+  // rewrite the value behind the user's back.
   {
     storage.set('dsh-mini-notes.v2', JSON.stringify({
       v: 2, notes: [{ id: 1, text: '', images: [] }], activeId: 1, seq: 1,
       open: true, pinned: true, box: { x: 40, y: 60, w: 400, h: 460 },
       trash: [], view: 'note', zoom: 1
     }))
-    const rp = loadFresh()
-    const ed = rp.panel.querySelector('.mn-editor')
-    typeInto(ed, 'aaa')
+    const nu = loadFresh()
+    const area = nu.panel.querySelector('.mn-text')
+    typeInto(area, '第一行')
     await settled()
+    let st2 = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st2.notes[0].text, '第一行', 'first line typed')
 
-    // Paste an image — this is what forces the repaint.
-    ed.listeners.paste[0]({
-      clipboardData: { files: [{ type: 'image/png', name: 'a.png' }], items: [] },
-      preventDefault() {}
-    })
+    // one Enter
+    pressEnter(area)
     await settled()
-    let st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(st.notes[0].images.length, 1, 'image attached')
+    st2 = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st2.notes[0].text, '第一行\n', `one Enter adds one newline (got ${JSON.stringify(st2.notes[0].text)})`)
 
-    // Repaint happens on the next render (as an image update does).
-    const painted = mount(registered.get('mini-notes-layer').component).tree
+    // second line, then another Enter
+    typeInto(area, '第一行\n第二行')
     await settled()
-    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    const before = st.notes[0].text
-
-    // ONE Enter, on the freshly repainted editor.
-    const ed2 = painted.querySelector('.mn-editor')
-    ed2.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
+    pressEnter(area)
     await settled()
-    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    st2 = JSON.parse(storage.get('dsh-mini-notes.v2'))
     assert.strictEqual(
-      st.notes[0].text,
-      before + '\n',
-      `one Enter after a repaint adds one newline (was ${JSON.stringify(before)}, now ${JSON.stringify(st.notes[0].text)})`
-    )
-  }
-
-  // Regression: Enter must insert a line break, not truncate the page.
-  // The editor originally captured a page snapshot at build time, so the second
-  // edit was computed against stale text and the current line got overwritten.
-  {
-    storage.set('dsh-mini-notes.v2', JSON.stringify({
-      v: 2, notes: [{ id: 1, text: '', images: [] }], activeId: 1, seq: 1,
-      open: true, pinned: true, box: { x: 40, y: 60, w: 400, h: 460 },
-      trash: [], view: 'note', zoom: 1
-    }))
-    const enterUi = loadFresh()
-    const ed = enterUi.panel.querySelector('.mn-editor')
-
-    // type the first line
-    typeInto(ed, '第一行')
-    await settled()
-    let st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(st.notes[0].text, '第一行', 'first line typed')
-
-    // press Enter -> a newline is appended
-    ed.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
-    await settled()
-    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(st.notes[0].text, '第一行\n', `Enter adds a newline (got ${JSON.stringify(st.notes[0].text)})`)
-
-    // Second line typed into the SAME editor instance (no remount), then another
-    // Enter. This is where the original bug lived: the editor's captured page
-    // snapshot was stale, so text was spliced into old content and overwritten.
-    typeInto(ed, '第一行\n第二行')
-    await settled()
-    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(st.notes[0].text, '第一行\n第二行', 'second line kept the first')
-
-    ed.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
-    await settled()
-    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
-    assert.strictEqual(
-      st.notes[0].text,
+      st2.notes[0].text,
       '第一行\n第二行\n',
-      `second Enter on the same editor keeps both lines (got ${JSON.stringify(st.notes[0].text)})`
+      `second Enter keeps both lines (got ${JSON.stringify(st2.notes[0].text)})`
     )
-  }
 
-  // Regression: a page with an inline image must render it on reload.
-  {
-    storage.set('dsh-mini-notes.v2', JSON.stringify({
-      v: 2,
-      notes: [{ id: 1, text: 'before\uFFFCafter', images: [{ id: 'iabc', w: 800, h: 600, dw: 300 }] }],
-      activeId: 1, seq: 1, open: true, pinned: true,
-      box: { x: 40, y: 60, w: 400, h: 460 }, trash: [], view: 'note'
-    }))
-    storage.set('dsh-mini-notes.img.iabc', 'data:image/png;base64,AAAA')
-    const reloadImg = loadFresh()
-    assert.ok(reloadImg.panel, 'panel opens')
-    assert.strictEqual(byClass(reloadImg.panel, 'mn-fig').length, 1, 'inline image renders right after reload')
-    const figNow = byClass(reloadImg.panel, 'mn-fig')[0]
-    const imgInFig = figNow.children.find((c) => c.tagName === 'IMG')
-    assert.ok(imgInFig, `figure holds an img (children: ${figNow.children.map((c) => c.tagName)})`)
-    assert.ok(String(imgInFig.src).startsWith('data:image/png'), 'restored image has its source')
+    // the value shown to the user matches what was stored
+    assert.strictEqual(area.value, '第一行\n第二行\n', 'textarea keeps its own newlines')
   }
 
   // A panel left on the trash must survive a reload as open + trash.

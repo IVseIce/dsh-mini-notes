@@ -48,16 +48,6 @@ window.__ModuleLoader__.load({
       'zoom.out': '缩小',
       'zoom.reset': '恢复 100%',
       'note.empty': '暂无内容',
-      'note.images': '{n} 张图',
-      'img.drop': '松手即插入',
-      'img.remove': '删除这张图',
-      'img.zoomIn': '放大',
-      'img.zoomOut': '缩小',
-      'img.reset': '原始大小',
-      'img.close': '关闭',
-      'img.tooBig': '图片太大，未能保存（可删几张旧图再试）',
-      'img.bad': '无法读取这张图片',
-      'img.count': '图片 {n} 张',
       'confirm.cancel': '取消',
       'confirm.ok': '彻底删除',
       'trash.title': '回收站',
@@ -93,16 +83,6 @@ window.__ModuleLoader__.load({
       'zoom.out': 'Zoom out',
       'zoom.reset': 'Reset to 100%',
       'note.empty': 'Empty',
-      'note.images': '{n} image(s)',
-      'img.drop': 'Drop to add',
-      'img.remove': 'Remove this image',
-      'img.zoomIn': 'Zoom in',
-      'img.zoomOut': 'Zoom out',
-      'img.reset': 'Actual size',
-      'img.close': 'Close',
-      'img.tooBig': 'Image too large to save (remove an older one and retry)',
-      'img.bad': 'This image could not be read',
-      'img.count': '{n} image(s)',
       'confirm.cancel': 'Cancel',
       'confirm.ok': 'Delete',
       'trash.title': 'Trash',
@@ -145,75 +125,6 @@ window.__ModuleLoader__.load({
     })
 
     const isNum = (value) => typeof value === 'number' && Number.isFinite(value)
-
-    /** Image bytes live under their own storage keys; a page only keeps ids. */
-    const IMG_KEY = 'dsh-mini-notes.img.'
-
-    /**
-     * Inline images occupy exactly ONE character in the page's text, so a caret
-     * offset in the text always equals a caret offset in the rendered document.
-     * `note.images[n]` describes the nth placeholder, in document order.
-     */
-    const IMG_CHAR = '\uFFFC'
-
-    const isImgChar = (ch) => ch === IMG_CHAR
-
-    /** Placeholders currently in a page's text. */
-    function placeholdersIn(text) {
-      let count = 0
-      for (const ch of text) if (isImgChar(ch)) count += 1
-      return count
-    }
-
-    /** Default display width: a readable, message-sized picture. */
-    function defaultImgWidth() {
-      const panel = state && state.box ? state.box.w : DEFAULT_W
-      return Math.max(160, Math.min(520, panel - 48))
-    }
-
-    /**
-     * Keep only well-formed image records: { id, w, h } in pixels plus `dw`, the
-     * display width the user dragged to. `dw` falls back to a readable default.
-     */
-    function readImages(value) {
-      if (!Array.isArray(value)) return []
-      const out = []
-      for (const item of value) {
-        if (!item || typeof item.id !== 'string' || item.id === '') continue
-        out.push({
-          id: item.id,
-          w: isNum(item.w) ? item.w : 0,
-          h: isNum(item.h) ? item.h : 0,
-          dw: isNum(item.dw) ? item.dw : 0
-        })
-      }
-      return out
-    }
-
-    /**
-     * Make `text` and `images` agree: older versions kept images in a strip below
-     * the text with no placeholders, so append them; any other mismatch trims the
-     * longer side instead of losing the page.
-     */
-    function reconcile(text, images) {
-      const count = placeholdersIn(text)
-      if (count === images.length) return { text, images }
-      if (count === 0) return { text: text + IMG_CHAR.repeat(images.length), images }
-      if (count > images.length) return { text, images }
-      return { text: text + IMG_CHAR.repeat(images.length - count), images }
-    }
-
-    /** Display width for one image record, clamped to the panel. */
-    function displayWidth(image) {
-      const panel = state && state.box ? state.box.w : DEFAULT_W
-      const zoom = state && isNum(state.zoom) ? state.zoom : 1
-      const want = image.dw > 0 ? image.dw : 0
-      const natural = image.w > 0 ? image.w : 320
-      // An undragged image keeps a readable share of the page; both the natural
-      // size and the panel cap scale with the page zoom.
-      const base = want > 0 ? want : Math.min(natural, defaultImgWidth())
-      return Math.max(60, Math.min(Math.round(base * zoom), panel - 40))
-    }
 
     function viewport() {
       return { w: window.innerWidth || 1280, h: window.innerHeight || 800 }
@@ -292,8 +203,7 @@ window.__ModuleLoader__.load({
           if (!item || typeof item.text !== 'string') continue
           const id = isNum(item.id) ? item.id : seq + 1
           seq = Math.max(seq, id)
-          const fixed = reconcile(item.text, readImages(item.images))
-          notes.push({ id, text: fixed.text, images: fixed.images })
+          notes.push({ id, text: item.text })
         }
         const activeId = notes.some((note) => note.id === data.activeId) ? data.activeId : (notes[0]?.id ?? 0)
 
@@ -303,8 +213,7 @@ window.__ModuleLoader__.load({
           if (!item || typeof item.text !== 'string') continue
           trash.push({
             id: isNum(item.id) ? item.id : trash.length + 1,
-            text: reconcile(item.text, readImages(item.images)).text,
-            images: reconcile(item.text, readImages(item.images)).images,
+            text: item.text,
             at: isNum(item.at) ? item.at : 0
           })
         }
@@ -407,7 +316,7 @@ window.__ModuleLoader__.load({
       commit({
         ...state,
         seq: id,
-        notes: [{ id, text: '', images: [] }],
+        notes: [{ id, text: '' }],
         activeId: id,
         open: true,
         box,
@@ -435,30 +344,20 @@ window.__ModuleLoader__.load({
       commit({ ...state, activeId: id })
     }
 
-    /**
-     * Replace a page's text. Deleting an image chip in the editor removes one
-     * placeholder, so the image list is trimmed to match and orphaned bytes are
-     * released. Reordering is not possible via typing, so index order is kept.
-     */
+    /** Replace a page's text. The textarea owns the caret and newlines; this
+     *  only records what is already on screen. */
     function setText(id, text) {
       const note = state.notes.find((item) => item.id === id)
       if (!note || note.text === text) return
-      const want = placeholdersIn(text)
-      let images = note.images
-      if (want !== images.length) {
-        const kept = images.slice(0, want)
-        for (const image of images.slice(want)) dropImageData(image.id)
-        images = kept
-      }
       commit({
         ...state,
-        notes: state.notes.map((item) => (item.id === id ? { ...item, text, images } : item))
+        notes: state.notes.map((item) => (item.id === id ? { ...item, text } : item))
       })
     }
 
     function addNote() {
       const id = state.seq + 1
-      commit({ ...state, seq: id, notes: [...state.notes, { id, text: '', images: [] }], activeId: id, open: true, view: 'note' })
+      commit({ ...state, seq: id, notes: [...state.notes, { id, text: '' }], activeId: id, open: true, view: 'note' })
     }
 
     /** Close a page: it moves to the trash instead of disappearing. */
@@ -467,7 +366,7 @@ window.__ModuleLoader__.load({
       if (index < 0) return
       const closed = state.notes[index]
       const notes = state.notes.filter((note) => note.id !== id)
-      const trash = [{ id: closed.id, text: closed.text, images: closed.images, at: Date.now() }, ...state.trash].slice(0, MAX_TRASH)
+      const trash = [{ id: closed.id, text: closed.text, at: Date.now() }, ...state.trash].slice(0, MAX_TRASH)
       if (notes.length === 0) {
         // No pages left: keep the window open on the trash so the closed page is
         // visibly recoverable instead of seeming lost.
@@ -485,7 +384,7 @@ window.__ModuleLoader__.load({
       // hand the user a fresh blank page instead.
       if (view === 'note' && state.notes.length === 0) {
         const id = state.seq + 1
-        commit({ ...state, seq: id, notes: [{ id, text: '', images: [] }], activeId: id, open: true, view: 'note' })
+        commit({ ...state, seq: id, notes: [{ id, text: '' }], activeId: id, open: true, view: 'note' })
         return
       }
       commit({ ...state, view })
@@ -500,7 +399,7 @@ window.__ModuleLoader__.load({
       commit({
         ...state,
         seq: Math.max(state.seq, nextId),
-        notes: [...state.notes, { id: nextId, text: entry.text, images: entry.images }],
+        notes: [...state.notes, { id: nextId, text: entry.text }],
         activeId: nextId,
         open: true,
         view: 'note',
@@ -538,12 +437,9 @@ window.__ModuleLoader__.load({
       const pending = state.pending
       if (!pending) return
       if (pending.kind === 'purge') {
-        const entry = state.trash.find((item) => item.id === pending.id)
-        if (entry) releaseImages(entry.images)
         commit({ ...state, pending: null, trash: state.trash.filter((item) => item.id !== pending.id) })
         return
       }
-      for (const entry of state.trash) releaseImages(entry.images)
       commit({ ...state, pending: null, trash: [] })
     }
 
@@ -559,7 +455,7 @@ window.__ModuleLoader__.load({
       commit({ ...state, notes })
     }
 
-    /** Whole-panel zoom: text and images scale together. */
+    /** Whole-panel zoom for the note text. */
     function setZoom(next) {
       const zoom = Math.min(2.5, Math.max(0.7, Math.round((isNum(next) ? next : 1) * 100) / 100))
       if (zoom === state.zoom) return
@@ -568,213 +464,6 @@ window.__ModuleLoader__.load({
 
     function setBox(box) {
       commit({ ...state, box: fitBox(box) })
-    }
-
-    // ----------------------------------------------------------------- images
-    //
-    // One localStorage entry per image, so typing never rewrites image bytes and
-    // a page's JSON stays tiny. Paste/drop input is downscaled and re-encoded
-    // once, then stored; `addImage` reports failure instead of dropping silently.
-
-    const MAX_EDGE = 1600
-    const IMG_QUALITY = 0.82
-
-    /** Data-URL cache: thumbnails read this instead of touching storage. */
-    const imageCache = new Map()
-
-    /** Read one stored image's data URL, or null when it is gone. */
-    function readImageData(id) {
-      if (imageCache.has(id)) return imageCache.get(id)
-      let value = null
-      try {
-        value = window.localStorage.getItem(IMG_KEY + id)
-      } catch {
-        value = null
-      }
-      if (value !== null) imageCache.set(id, value)
-      return value
-    }
-
-    /** True when the bytes for this id are still stored. */
-    function hasImageData(id) {
-      return readImageData(id) !== null
-    }
-
-    /** Write one image's data URL; false when the quota refused it. */
-    function writeImageData(id, dataUrl) {
-      try {
-        window.localStorage.setItem(IMG_KEY + id, dataUrl)
-        imageCache.set(id, dataUrl)
-        return true
-      } catch {
-        return false
-      }
-    }
-
-    function dropImageData(id) {
-      imageCache.delete(id)
-      try {
-        window.localStorage.removeItem(IMG_KEY + id)
-      } catch {
-        /* nothing to release */
-      }
-    }
-
-    /**
-     * Downscale a picked/pasted image and re-encode it, so screenshots land
-     * around 100–300 KB instead of multi-megabyte PNGs.
-     * @returns {Promise<{ dataUrl: string, w: number, h: number } | null>}
-     */
-    function prepareImage(file) {
-      return new Promise((resolve) => {
-        const url = URL.createObjectURL(file)
-        const img = new Image()
-        img.onload = () => {
-          try {
-            const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
-            const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale))
-            const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale))
-            const canvas = document.createElement('canvas')
-            canvas.width = w
-            canvas.height = h
-            const ctx = canvas.getContext('2d')
-            ctx.drawImage(img, 0, 0, w, h)
-            // WebP keeps screenshots sharp at a fraction of PNG's size; browsers
-            // without it silently fall back to PNG.
-            let dataUrl = canvas.toDataURL('image/webp', IMG_QUALITY)
-            if (dataUrl.startsWith('data:image/webp') && dataUrl.length < 64) {
-              dataUrl = canvas.toDataURL('image/png')
-            }
-            resolve({ dataUrl, w, h })
-          } catch {
-            resolve(null)
-          } finally {
-            URL.revokeObjectURL(url)
-          }
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          resolve(null)
-        }
-        img.src = url
-      })
-    }
-
-    /** Last image failure, shown in the footer until the next success. */
-    let imageErrorKey = ''
-    const imageErrorListeners = new Set()
-
-    function setImageError(message) {
-      if (imageErrorKey === message) return
-      imageErrorKey = message
-      for (const listener of [...imageErrorListeners]) listener()
-    }
-
-    function subscribeImageError(listener) {
-      imageErrorListeners.add(listener)
-      return () => {
-        imageErrorListeners.delete(listener)
-      }
-    }
-
-    function readImageError() {
-      return imageErrorKey
-    }
-
-    /** Turn an attach result into the footer message the user sees. */
-    function report(promise) {
-      promise.then((result) => {
-        if (result === 'too-big') setImageError('img.tooBig')
-        else if (result === 'bad') setImageError('img.bad')
-      })
-    }
-
-    /** Add one image to a page; returns 'ok' | 'too-big' | 'bad'. */
-    /**
-     * Insert images at a caret offset in a page. `at` is a plain string offset;
-     * every image becomes one IMG_CHAR there, and its record lands at the same
-     * position in `images`, so the two stay in step.
-     * @returns {Promise<'ok'|'too-big'|'bad'>}
-     */
-    async function attachImages(pageId, files, at) {
-      let lastFailure = 'ok'
-      for (const file of files) {
-        if (!file || !/^image\//.test(file.type || '')) continue
-        const prepared = await prepareImage(file)
-        if (!prepared) {
-          lastFailure = 'bad'
-          continue
-        }
-        const imageId = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
-        if (!writeImageData(imageId, prepared.dataUrl)) {
-          lastFailure = 'too-big'
-          continue
-        }
-        const note = state.notes.find((item) => item.id === pageId)
-        if (!note) {
-          dropImageData(imageId)
-          continue
-        }
-        const offset = Math.max(0, Math.min(isNum(at) ? at : note.text.length, note.text.length))
-        const before = note.text.slice(0, offset)
-        const shown = placeholdersIn(before)
-        const text = `${before}${IMG_CHAR}${note.text.slice(offset)}`
-        const images = note.images.slice()
-        images.splice(shown, 0, { id: imageId, w: prepared.w, h: prepared.h, dw: 0 })
-        commit({ ...state, notes: state.notes.map((item) => (item.id === pageId ? { ...item, text, images } : item)) })
-        // Successive images from one drop land after each other.
-        at = offset + 1
-      }
-      if (lastFailure === 'ok') setImageError('')
-      return lastFailure
-    }
-
-    /** Resize one inline image (by its index in the page's images array). */
-    function resizeImage(pageId, shownIndex, width) {
-      const note = state.notes.find((item) => item.id === pageId)
-      if (!note || !note.images[shownIndex]) return
-      const panel = state.box ? state.box.w : DEFAULT_W
-      const dw = Math.max(60, Math.min(Math.round(width), panel - 40))
-      commit({
-        ...state,
-        notes: state.notes.map((item) =>
-          item.id === pageId
-            ? { ...item, images: item.images.map((image, index) => (index === shownIndex ? { ...image, dw } : image)) }
-            : item
-        )
-      })
-    }
-
-    /** Drop the stored bytes for a list of image records. */
-    function releaseImages(images) {
-      for (const image of Array.isArray(images) ? images : []) dropImageData(image.id)
-    }
-
-    /** Remove the nth image of a page, and its single placeholder character. */
-    function detachImage(pageId, shownIndex) {
-      const note = state.notes.find((item) => item.id === pageId)
-      const image = note && note.images[shownIndex]
-      if (!image) return
-      let seen = -1
-      let cut = -1
-      for (let i = 0; i < note.text.length; i += 1) {
-        if (!isImgChar(note.text[i])) continue
-        seen += 1
-        if (seen === shownIndex) {
-          cut = i
-          break
-        }
-      }
-      const text = cut < 0 ? note.text : note.text.slice(0, cut) + note.text.slice(cut + 1)
-      commit({
-        ...state,
-        notes: state.notes.map((item) =>
-          item.id === pageId
-            ? { ...item, text, images: item.images.filter((_, index) => index !== shownIndex) }
-            : item
-        )
-      })
-      dropImageData(image.id)
     }
 
     // ----------------------------------------------------------------- icons
@@ -869,34 +558,6 @@ window.__ModuleLoader__.load({
       // and which slot it would land in.
       const tabDrag = useRef(null)
       const [tabDrop, setTabDrop] = React.useState(null)
-      // Set while files are being dragged over the panel.
-      const [dropping, setDropping] = React.useState(false)
-      // Localized key of the last image failure ('' when none).
-      const imageErrorKey = useSyncExternalStore(subscribeImageError, readImageError, readImageError)
-
-      // Drag-to-add: file drops anywhere on the panel attach to the page it shows.
-      const onDragOver = (event) => {
-        if (!imageFilesOf(event.dataTransfer).length) return
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'copy'
-        if (!dropping) setDropping(true)
-      }
-
-      const onDragLeave = (event) => {
-        if (event.currentTarget.contains(event.relatedTarget)) return
-        setDropping(false)
-      }
-
-      const onDrop = (event) => {
-        const files = imageFilesOf(event.dataTransfer)
-        if (files.length === 0) return
-        event.preventDefault()
-        setDropping(false)
-        const target = current.notes.find((item) => item.id === current.activeId) ?? current.notes[0]
-        if (!target) return
-        const at = editorRef.current && editorRef.current.api ? editorRef.current.api.caret.offset : target.text.length
-        report(attachImages(target.id, files, at))
-      }
       const note = current.notes.find((item) => item.id === current.activeId) ?? current.notes[0]
       const box = current.box ?? fitBox({ x: EDGE, y: EDGE, w: DEFAULT_W, h: DEFAULT_H })
 
@@ -937,31 +598,6 @@ window.__ModuleLoader__.load({
       }, [])
 
       // Escape closes the panel unless it is pinned.
-      // One editor per open page; rebuilt when the active page changes.
-      const editorRef = useRef(null)
-      const activeNote = current.notes.find((item) => item.id === current.activeId) ?? current.notes[0]
-      const editorKey = activeNote ? `${activeNote.id}` : ''
-      if (!editorRef.current || editorRef.current.key !== editorKey) {
-        editorRef.current = activeNote
-          ? { key: editorKey, api: makeEditor(activeNote.id, activeNote, t), text: activeNote.text }
-          : null
-      }
-      const editor = editorRef.current ? editorRef.current.api : null
-      useEffect(() => {
-        const holder = editorRef.current
-        if (!holder || !holder.api || !activeNote) return
-        // Trust the DOM only when it already matches the stored page. This is a
-        // short string compare, and it covers the case the old "did the text
-        // change externally" test missed: a fresh mount whose ref never painted
-        // (so a reloaded page showed no images until something else touched it).
-        const domText = holder.api.currentText()
-        const zoom = current.zoom || 1
-        if (domText === activeNote.text && holder.painted === activeNote.images.length && holder.zoom === zoom) return
-        holder.painted = activeNote.images.length
-        holder.zoom = zoom
-        holder.api.paint(activeNote)
-      })
-
       // Keep the active tab in view when the strip has to scroll.
       useEffect(() => {
         const root = rootRef.current
@@ -1112,11 +748,6 @@ window.__ModuleLoader__.load({
           className: 'mn-panel',
           'data-mini-notes-panel': '',
           'data-view': showingTrash ? 'trash' : 'note',
-          'data-dropping': dropping ? '1' : undefined,
-          onDragOver,
-          onDragEnter: onDragOver,
-          onDragLeave,
-          onDrop,
           style: {
             left: `${box.x}px`,
             top: `${box.y}px`,
@@ -1277,9 +908,8 @@ window.__ModuleLoader__.load({
         ),
         showingTrash
           ? renderTrash(current, t)
-          : renderNote(note, current, t, imageErrorKey, editor),
+          : renderNote(note, current, t),
         renderConfirm(current, t),
-        dropping ? h('div', { className: 'mn-drop-hint' }, t('img.drop')) : null,
         h('div', {
           className: 'mn-grip',
           'aria-hidden': true,
@@ -1291,75 +921,82 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** Editor + footer for the active page. */
-    /**
-     * Inline editable page: real text plus inline image chips, like a document.
-     *
-     * The stored form is the text with one IMG_CHAR per image, so the DOM can be
-     * rebuilt from data at any time without storing HTML. While typing we read the
-     * DOM back into that form; while resizing an image we only touch numbers and
-     * leave the DOM alone, so the caret never jumps.
-     */
-    function renderNote(note, current, t, imageErrorKey, editor) {
-      const images = note.images
+    /** Header button: opens or hides the panel. */
+    function NotesButton({ t }) {
+      const open = useSyncExternalStore(subscribe, readButton, readButton)
+      return h(
+        'button',
+        {
+          type: 'button',
+          className: 'mn-launcher',
+          'data-mini-notes-launcher': '',
+          'data-active': open ? '1' : undefined,
+          'aria-pressed': open,
+          'aria-label': t('button.label'),
+          title: t('button.hint'),
+          onClick: (event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            anchor = { right: rect.right, bottom: rect.bottom }
+            togglePanel()
+          }
+        },
+        noteIcon
+      )
+    }
+
+    /** Editor + footer for the active page. A plain textarea: no inline rich
+     *  content, so the browser owns the caret and newlines behave normally. */
+    function renderNote(note, current, t) {
       return h(
         React.Fragment,
         null,
-        h('div', {
-          className: 'mn-editor',
+        h('textarea', {
+          className: 'mn-text',
           key: note.id,
-          contentEditable: true,
-          suppressContentEditableWarning: true,
-          role: 'textbox',
-          'aria-multiline': true,
-          'aria-label': t('note.placeholder'),
-          'data-empty': note.text === '' ? '1' : undefined,
-          'data-placeholder': t('note.placeholder'),
+          defaultValue: note.text,
+          placeholder: t('note.placeholder'),
           spellCheck: false,
-          ref: editor.attach,
-          onInput: editor.onInput,
-          onPaste: editor.onPaste,
-          onKeyDown: editor.onKeyDown,
-          onClick: editor.onClick,
-          onPasteCapture: undefined
+          autoFocus: note.text === '',
+          onChange: (event) => setText(note.id, event.target.value)
         }),
         h(
           'div',
           { className: 'mn-foot' },
           h(
             'span',
-            { className: imageErrorKey ? 'mn-status mn-status-error' : 'mn-status' },
-            imageErrorKey
-              ? t(imageErrorKey)
-              : note.text.replace(new RegExp(IMG_CHAR, 'g'), '').trim()
-                ? `${note.text.replace(new RegExp(IMG_CHAR, 'g'), '').trim().length} · ${t('note.saved')}`
-                : images.length > 0
-                  ? t('img.count', { n: images.length })
-                  : t('note.empty')
+            { className: 'mn-status' },
+            note.text.trim() ? `${note.text.trim().length} · ${t('note.saved')}` : t('note.empty')
           ),
           h('span', { className: 'mn-spacer' }),
-          images.length > 0 ? h('span', { className: 'mn-hint' }, t('note.images', { n: images.length })) : null,
           h('span', { className: 'mn-hint' }, t('note.pages', { n: current.notes.length }))
         )
       )
     }
 
-    /** Pull image files out of a paste or drop payload. */
-    function imageFilesOf(transfer) {
-      if (!transfer) return []
-      const out = []
-      if (transfer.files && transfer.files.length > 0) {
-        for (const file of transfer.files) if (/^image\//.test(file.type || '')) out.push(file)
-      }
-      if (out.length === 0 && transfer.items) {
-        for (const item of transfer.items) {
-          if (item.kind === 'file' && /^image\//.test(item.type || '')) {
-            const file = item.getAsFile()
-            if (file) out.push(file)
-          }
-        }
-      }
-      return out
+    /** In-panel confirmation for a destructive trash action. */
+    function renderConfirm(current, t) {
+      const pending = current.pending
+      if (!pending) return null
+      const message = pending.kind === 'clear' ? t('trash.clearConfirm') : t('trash.purgeConfirm')
+      return h(
+        'div',
+        { className: 'mn-confirm-mask' },
+        h(
+          'div',
+          { className: 'mn-confirm', role: 'alertdialog', 'aria-modal': true },
+          h('div', { className: 'mn-confirm-text' }, message),
+          h(
+            'div',
+            { className: 'mn-confirm-actions' },
+            h(
+              'button',
+              { type: 'button', className: 'mn-confirm-cancel', onClick: dismissConfirm, autoFocus: true },
+              t('confirm.cancel')
+            ),
+            h('button', { type: 'button', className: 'mn-confirm-ok', onClick: acceptConfirm }, t('confirm.ok'))
+          )
+        )
+      )
     }
 
     /** "3 分钟前" style short age for a trashed page. */
@@ -1437,410 +1074,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /**
-     * Editor plumbing for one page: mirrors text ⇄ DOM, keeps the caret, and
-     * handles paste / inline image insertion and edge-resize.
-     *
-     * Only the caret offset is tracked (a number in the stored text), never a DOM
-     * Range across renders: the DOM is rebuilt only when the page or its text
-     * changes from outside, and rebuilt content restores the caret from `offset`.
-     */
-    /** Latest state of one page, or undefined when it no longer exists. */
-    function liveNote(pageId) {
-      return state.notes.find((item) => item.id === pageId)
-    }
-
-    function makeEditor(pageId, initial, t) {
-      // The store replaces `notes` on every edit, so a captured page object goes
-      // stale immediately. Always read through liveNote().
-      let note = initial
-      const ref = { current: null }
-      /** Caret offset within the page's stored text (0..text.length). */
-      const caret = { offset: note.text.length }
-      /** Set while we rebuild the DOM ourselves, to ignore our own input events. */
-      let rebuilding = false
-
-      /** Nth image chip in the DOM, in document order. */
-      const chips = () => (ref.current ? Array.from(ref.current.querySelectorAll('[data-img-index]')) : [])
-
-      /** Read the DOM back into the stored string form. */
-      function readDom() {
-        const root = ref.current
-        if (!root) return note.text
-        let out = ''
-        const walk = (node) => {
-          if (node.nodeType === 3) {
-            out += node.nodeValue.replace(/\uFFFC/g, '')
-            return
-          }
-          if (node.nodeType !== 1) return
-          if (node.hasAttribute && node.hasAttribute('data-img-index')) {
-            out += IMG_CHAR
-            return
-          }
-          if (node.tagName === 'BR') {
-            out += '\n'
-            return
-          }
-          const block = node !== root && /^(DIV|P)$/.test(node.tagName)
-          const before = out.length
-          for (const child of Array.from(node.childNodes)) walk(child)
-          if (block && out.length > before && !out.endsWith('\n')) out += '\n'
-        }
-        for (const child of Array.from(root.childNodes)) walk(child)
-        // Do NOT trim a trailing newline: a page ending in "\n" renders as a
-        // trailing <br>, and trimming here made that Enter look like a no-op
-        // (users had to press it twice). Any trailing newline a block wrapper
-        // added is already excluded by the block rule above.
-        return out
-      }
-
-      /** Build the DOM for a page, restoring the caret if we own the focus. */
-      function paint(entry) {
-        note = liveNote(pageId) ?? entry ?? note
-        const root = ref.current
-        if (!root) return
-        rebuilding = true
-        root.textContent = ''
-        let seen = -1
-        let buffer = ''
-        const flushText = () => {
-          if (buffer === '') return
-          const parts = buffer.split('\n')
-          parts.forEach((line, index) => {
-            if (index > 0) root.appendChild(document.createElement('br'))
-            if (line !== '') root.appendChild(document.createTextNode(line))
-          })
-          buffer = ''
-        }
-        for (const ch of entry.text) {
-          if (!isImgChar(ch)) {
-            buffer += ch
-            continue
-          }
-          seen += 1
-          flushText()
-          const image = entry.images[seen]
-          if (!image) continue
-          root.appendChild(buildChip(image, seen))
-        }
-        flushText()
-        if (root.childNodes.length === 0) root.appendChild(document.createElement('br'))
-        root.setAttribute('data-empty', entry.text === '' ? '1' : 'false')
-        rebuilding = false
-        if (selected && !root.contains(selected)) selected = null
-        if (document.activeElement === root) setCaret(caret.offset)
-      }
-
-      /** One inline image: a figure that resizes from its edges. */
-      function buildChip(image, index) {
-        const width = displayWidth(image)
-        const src = readImageData(image.id)
-        const fig = document.createElement('span')
-        fig.className = 'mn-fig'
-        fig.setAttribute('data-img-index', String(index))
-        fig.setAttribute('contenteditable', 'false')
-        fig.style.width = `${width}px`
-        if (src) {
-          const img = document.createElement('img')
-          img.src = src
-          img.draggable = false
-          img.alt = ''
-          img.addEventListener('mousedown', (event) => selectChip(event, fig))
-          fig.appendChild(img)
-        } else {
-          const missing = document.createElement('span')
-          missing.className = 'mn-fig-missing'
-          missing.textContent = t('img.bad')
-          fig.appendChild(missing)
-        }
-        for (const side of ['left', 'right']) {
-          const grip = document.createElement('span')
-          grip.className = `mn-fig-grip mn-fig-grip-${side}`
-          grip.setAttribute('data-side', side)
-          grip.addEventListener('pointerdown', (event) => startResize(event, index, side))
-          fig.appendChild(grip)
-        }
-        return fig
-      }
-
-      /** Edge drag: resizes that image only; the caret is untouched. */
-      function startResize(event, index, side) {
-        event.preventDefault()
-        event.stopPropagation()
-        const fig = event.currentTarget.parentElement
-        const startX = event.clientX
-        const startW = fig ? fig.getBoundingClientRect().width : 0
-        const move = (moveEvent) => {
-          const delta = moveEvent.clientX - startX
-          const next = side === 'right' ? startW + delta : startW - delta
-          if (fig) fig.style.width = `${Math.max(60, Math.round(next))}px`
-        }
-        const up = (upEvent) => {
-          window.removeEventListener('pointermove', move)
-          window.removeEventListener('pointerup', up)
-          const delta = upEvent.clientX - startX
-          resizeImage(pageId, index, side === 'right' ? startW + delta : startW - delta)
-        }
-        window.addEventListener('pointermove', move)
-        window.addEventListener('pointerup', up)
-      }
-
-      /** Selection → stored-text offset. Images count as one character. */
-      function readCaret() {
-        note = liveNote(pageId) ?? note
-        const root = ref.current
-        const sel = window.getSelection && window.getSelection()
-        if (!root || !sel || sel.rangeCount === 0) return caret.offset
-        const range = sel.getRangeAt(0)
-        if (!range || !root.contains(range.startContainer)) return caret.offset
-        const startNode = range.startContainer
-        const startOffset = range.startOffset
-        let offset = 0
-        let done = false
-        const walk = (node) => {
-          if (done) return
-          if (node === startNode) {
-            if (node.nodeType === 3) offset += Math.min(startOffset, node.nodeValue.length)
-            else if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-img-index')) {
-              offset += startOffset >= 1 ? 1 : 0
-            }
-            done = true
-            return
-          }
-          if (node.nodeType === 3) {
-            offset += node.nodeValue.replace(/\uFFFC/g, '').length
-            return
-          }
-          if (node.nodeType !== 1) return
-          if (node.hasAttribute && node.hasAttribute('data-img-index')) {
-            offset += 1
-            return
-          }
-          // A <br> is one "\n" in readDom, so it counts as one caret character.
-          if (node.tagName === 'BR') {
-            offset += 1
-            return
-          }
-          for (const child of Array.from(node.childNodes)) {
-            walk(child)
-            if (done) return
-          }
-        }
-        for (const child of Array.from(root.childNodes)) {
-          walk(child)
-          if (done) break
-        }
-        return Math.min(offset, note.text.length)
-      }
-
-      /** Put the caret at a stored-text offset (used after a rebuild). */
-      function setCaret(offset) {
-        const root = ref.current
-        if (!root) return
-        const sel = window.getSelection && window.getSelection()
-        if (!sel) return
-        let remaining = Math.max(0, Math.min(offset, note.text.length))
-        let target = null
-        let targetOffset = 0
-        const walk = (node) => {
-          if (target) return
-          if (node.nodeType === 3) {
-            const length = node.nodeValue.replace(/\uFFFC/g, '').length
-            if (remaining <= length) {
-              target = node
-              targetOffset = remaining
-              return
-            }
-            remaining -= length
-            return
-          }
-          if (node.nodeType !== 1) return
-          if (node.hasAttribute && node.hasAttribute('data-img-index')) {
-            if (remaining === 0) {
-              target = node
-              targetOffset = 0
-              return
-            }
-            remaining -= 1
-            return
-          }
-          for (const child of Array.from(node.childNodes)) walk(child)
-        }
-        for (const child of Array.from(root.childNodes)) walk(child)
-        const range = document.createRange()
-        if (target && target.nodeType === 3) range.setStart(target, Math.min(targetOffset, target.nodeValue.length))
-        else if (target) range.setStartBefore(target)
-        else {
-          range.selectNodeContents(root)
-          range.collapse(false)
-        }
-        range.collapse(true)
-        sel.removeAllRanges()
-        sel.addRange(range)
-      }
-
-      const onInput = () => {
-        note = liveNote(pageId) ?? note
-        if (rebuilding) return
-        caret.offset = readCaret()
-        const text = readDom()
-        setText(pageId, text)
-        if (ref.current) ref.current.setAttribute('data-empty', text === '' ? '1' : 'false')
-      }
-
-      /** Paste: an image goes in at the caret; text pastes as plain text. */
-      const onPaste = (event) => {
-        note = liveNote(pageId) ?? note
-        const files = imageFilesOf(event.clipboardData)
-        if (files.length > 0) {
-          event.preventDefault()
-          const at = readCaret()
-          // The image becomes one placeholder character at `at`; keep the caret
-          // after it so the next keystroke continues after the picture.
-          caret.offset = at + files.length
-          report(attachImages(pageId, files, at))
-          return
-        }
-        const text = event.clipboardData && event.clipboardData.getData('text/plain')
-        if (typeof text !== 'string') return
-        // Insert plain text ourselves: pasting rich HTML would inject foreign markup.
-        event.preventDefault()
-        const at = readCaret()
-        const next = `${note.text.slice(0, at)}${text.replace(/\uFFFC/g, '')}${note.text.slice(at)}`
-        caret.offset = at + text.length
-        setText(pageId, next)
-      }
-
-      const onKeyDown = (event) => {
-        note = liveNote(pageId) ?? note
-        if (selected && (event.key === 'Backspace' || event.key === 'Delete')) {
-          event.preventDefault()
-          deleteSelected()
-          return
-        }
-        if (selected && event.key === 'Escape') {
-          clearSelection()
-          return
-        }
-        // Keep the editor single-ish: Enter types a line break, not a wrapper <div>.
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          const at = readCaret()
-          const next = `${note.text.slice(0, at)}\n${note.text.slice(at)}`
-          caret.offset = at + 1
-          setText(pageId, next)
-        }
-      }
-
-      /** Currently selected image chip, so Backspace can delete it. */
-      let selected = null
-
-      /** Click an inline image: it becomes selected (no zoom, like a text object). */
-      function selectChip(event, fig) {
-        // Keep the browser from placing a text caret inside the figure.
-        event.preventDefault()
-        const root = ref.current
-        if (root) {
-          const sel = window.getSelection && window.getSelection()
-          const range = document.createRange()
-          range.setStartBefore(fig)
-          range.collapse(true)
-          if (sel) {
-            sel.removeAllRanges()
-            sel.addRange(range)
-          }
-        }
-        if (selected && selected !== fig) selected.removeAttribute('data-selected')
-        selected = fig
-        fig.setAttribute('data-selected', '1')
-        caret.offset = readCaret()
-      }
-
-      /** Clear the visual selection (called when the caret moves elsewhere). */
-      function clearSelection() {
-        if (!selected) return
-        selected.removeAttribute('data-selected')
-        selected = null
-      }
-
-      /** Delete the selected image, placeholder and bytes included. */
-      function deleteSelected() {
-        if (!selected) return false
-        const index = Number(selected.getAttribute('data-img-index'))
-        clearSelection()
-        detachImage(pageId, index)
-        return true
-      }
-
-      const onClick = (event) => {
-        const chip = event.target instanceof Element ? event.target.closest('[data-img-index]') : null
-        if (!chip) clearSelection()
-        caret.offset = readCaret()
-      }
-
-      const attach = (node) => {
-        ref.current = node
-        if (node) paint(note)
-      }
-
-      /** Called from the panel's effect once the DOM exists. */
-      const mount = (entry) => {
-        if (ref.current) paint(entry)
-      }
-
-      return { attach, mount, paint, onInput, onPaste, onKeyDown, onClick, caret, currentText: readDom }
-    }
-
-    /** In-panel confirmation for a destructive trash action. */
-    function renderConfirm(current, t) {
-      const pending = current.pending
-      if (!pending) return null
-      const message = pending.kind === 'clear' ? t('trash.clearConfirm') : t('trash.purgeConfirm')
-      return h(
-        'div',
-        { className: 'mn-confirm-mask' },
-        h(
-          'div',
-          { className: 'mn-confirm', role: 'alertdialog', 'aria-modal': true },
-          h('div', { className: 'mn-confirm-text' }, message),
-          h(
-            'div',
-            { className: 'mn-confirm-actions' },
-            h(
-              'button',
-              { type: 'button', className: 'mn-confirm-cancel', onClick: dismissConfirm, autoFocus: true },
-              t('confirm.cancel')
-            ),
-            h('button', { type: 'button', className: 'mn-confirm-ok', onClick: acceptConfirm }, t('confirm.ok'))
-          )
-        )
-      )
-    }
-
-    /** Header button: opens or hides the panel. */
-    function NotesButton({ t }) {
-      const open = useSyncExternalStore(subscribe, readButton, readButton)
-      return h(
-        'button',
-        {
-          type: 'button',
-          className: 'mn-launcher',
-          'data-mini-notes-launcher': '',
-          'data-active': open ? '1' : undefined,
-          'aria-pressed': open,
-          'aria-label': t('button.label'),
-          title: t('button.hint'),
-          onClick: (event) => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            anchor = { right: rect.right, bottom: rect.bottom }
-            togglePanel()
-          }
-        },
-        noteIcon
-      )
-    }
-
     // ---------------------------------------------------------------- styles
 
     const CSS = `
@@ -1875,22 +1108,8 @@ window.__ModuleLoader__.load({
       .mn-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);opacity:1}
       .mn-icon[data-on]{color:var(--dsw-alias-brand-primary);opacity:1}
       .mn-icon svg{width:14px;height:14px;flex:none}
-      .mn-editor{flex:1;min-height:0;box-sizing:border-box;width:100%;overflow-y:auto;padding:calc(12px * var(--mn-zoom,1)) calc(14px * var(--mn-zoom,1));outline:none;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:calc(13.5px * var(--mn-zoom,1));line-height:calc(22px * var(--mn-zoom,1));white-space:pre-wrap;word-break:break-word;caret-color:var(--dsw-alias-brand-primary)}
-      .mn-editor[data-empty=true]:before{content:attr(data-placeholder);color:var(--dsw-alias-label-caption);pointer-events:none}
-      .mn-editor img{max-width:100%}
-      .mn-fig{position:relative;display:block;margin:6px 0;max-width:100%;border-radius:var(--dsw-radius-sm);overflow:visible}
-      .mn-fig img{display:block;width:100%;height:auto;border-radius:var(--dsw-radius-sm);border:0.5px solid var(--dsw-alias-border-l1);cursor:default}
-      .mn-fig[data-selected] img{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;border-radius:var(--dsw-radius-sm)}
-      .mn-fig[data-selected] .mn-fig-grip:after{opacity:1}
-      .mn-fig-missing{display:block;padding:8px;font-size:12px;color:var(--dsw-alias-label-caption);border:0.5px dashed var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm)}
-      .mn-fig-grip{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;touch-action:none}
-      .mn-fig-grip-left{left:-4px}
-      .mn-fig-grip-right{right:-4px}
-      .mn-fig-grip:after{content:'';position:absolute;top:50%;transform:translateY(-50%);width:3px;height:24px;border-radius:2px;background:var(--dsw-alias-brand-primary);opacity:0;transition:opacity .1s ease}
-      .mn-fig-grip-left:after{left:2px}
-      .mn-fig-grip-right:after{right:2px}
-      .mn-fig:hover .mn-fig-grip:after{opacity:.55}
-      .mn-fig-grip:hover:after{opacity:1}
+      .mn-text{flex:1;min-height:0;box-sizing:border-box;width:100%;margin:0;padding:calc(12px * var(--mn-zoom,1)) calc(14px * var(--mn-zoom,1));border:none;outline:none;resize:none;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:calc(13.5px * var(--mn-zoom,1));line-height:calc(22px * var(--mn-zoom,1))}
+      .mn-text::placeholder{color:var(--dsw-alias-label-caption)}
       .mn-foot{flex:none;display:flex;align-items:center;gap:8px;height:24px;padding:0 18px 0 12px;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-caption);font-size:11px;line-height:16px}
       .mn-status{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .mn-status-error{color:var(--dsw-alias-state-error-primary)}
@@ -1919,8 +1138,6 @@ window.__ModuleLoader__.load({
       .mn-confirm-ok:focus-visible,.mn-confirm-cancel:focus-visible{outline:2px solid var(--dsw-focus-ring-color);outline-offset:1px}
       .mn-tab[data-dragging]{opacity:.55;cursor:grabbing}
       .mn-tab[data-drop]{box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
-      .mn-panel[data-dropping] .mn-editor{opacity:.5}
-      .mn-drop-hint{position:absolute;left:8px;right:8px;top:44px;bottom:32px;z-index:4;display:flex;align-items:center;justify-content:center;border-radius:var(--dsw-radius-md);border:1.5px dashed var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);color:var(--dsw-alias-brand-primary);font-size:12px;pointer-events:none}
       .mn-grip{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;touch-action:none;background:linear-gradient(135deg,transparent 0 50%,var(--dsw-alias-border-l2) 50% 60%,transparent 60% 70%,var(--dsw-alias-border-l2) 70% 80%,transparent 80%)}
     `
 
