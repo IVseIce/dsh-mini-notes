@@ -1,0 +1,6 @@
+# dsh-mini-notes bundle patch: one Host row.
+# The browser half joins the client graph through package.json `dsh.client`
+# and the "./client" export; the Host row is only a mount point.
+- insert:
+    - id: mini-notes
+      name: dsh-mini-notes
