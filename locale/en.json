@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Mini Notes",
-    "description": "One small button in the header that opens a scratch note. Several note windows, keep-on-top or close-on-click-away."
+    "description": "A notepad opened from the session header: multiple pages, inline images by drag or paste, draggable tabs, whole-page zoom, and a trash. Pure client-side, no dependencies."
   }
 }

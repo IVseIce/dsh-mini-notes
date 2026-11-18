@@ -1,76 +1,112 @@
-# dsh-mini-notes（极简便签）
+# dsh-mini-notes
 
-DSH Web 界面里的一个小记事本：会话标题栏右上角一个按钮，面板从按钮下方展开，随手记一笔。像 Windows 记事本 —— 无格式、无菜单、自动保存。
+English | [中文](README.zh.md)
 
-纯客户端插件，无依赖、无构建、无网络请求、不注册工具。
+A tiny notepad for the DSH Web UI. One button in the session header opens a panel you can type into — like Windows Notepad: no formatting, no menus, saves as you type.
 
-## 用法
+Pure client-side plugin. No dependencies, no build step, no network requests, registers no tools.
 
-### 面板
-- **展开/收起**：点标题栏右侧的便签图标；再点一次收起。
-- **位置**：首次贴着按钮右下方出现，之后记住你拖到的地方和拉到的大小。
-- **拖动**：按住顶部标签栏空白处。
-- **拉伸**：拖右下角的小三角（最小 280×220，不会超出窗口）。
-- **钉住**（图钉）：钉住时点别处不收起，方便边看对话边记；未钉住时点别处立即收起，`Esc` 也收起。
+<img src="icon.svg" width="64" alt="">
 
-### 多页
-- 顶部是浏览器式标签栏，标签标题取该页第一行文字。
-- `+` 在**最后一个标签后面**（同 Windows 记事本）；标签多了会均分收窄（最窄 46px，标题省略），窄到放不下才横向滚动。
-- **拖动标签可排序**：左右拖到新位置松手；只点不拖仍然是切换页。
-- 标签上的 × 是「关闭这一页」——不是删除，而是进回收站。
-
-### 缩放
-工具区的 `−` / `百分比` / `+`：整体缩放正文与图片（70%–250%），点百分比回到 100%。标签栏、底栏等窗口 chrome 不跟着缩放。缩放值会被记住。
-
-### 图片
-- 两种放入方式：**直接拖进面板**、在正文里**粘贴**。图片插在光标处，按原始比例显示（默认宽度取「面板宽 − 48」与 1600px 的较小值，最宽 520px），图里的字能直接读出来。
-- **拖动图片左右边缘可缩放**（60px 到面板宽 − 40）；原始像素不变，所以放大不模糊，也不动光标。
-- **点一下图片是选中**（蓝色描边），按 `Backspace` 或 `Delete` 删除；点别处取消选中，`Esc` 也可以。
-- 放入时自动压缩：最长边 1600px、WebP 0.82 质量，截图通常 100–300KB。
-- 受 localStorage 约 5MB 限制，大致可放 15–25 张；空间不足时底栏红字提示「图片太大，未能保存」，不会静默丢图。
-- 图片按页归属：关页进回收站时图片跟着走，恢复后仍在；彻底删除或清空回收站时才释放字节。
-
-### 回收站
-工具区的垃圾桶图标（不带角标）。
-- 点一行 = 恢复到标签栏；行尾 × = 彻底删除（面板内确认，不用浏览器弹窗）；底栏「清空回收站」= 一次删光。
-- 全部标签关掉后窗口不消失，停在回收站，避免「关了就没了」的错觉。
-- 最多保留 2000 条，超出丢弃最旧的。
-
-### 存储
-停手 0.3 秒自动保存到本机 `localStorage`（`dsh-mini-notes.v2`），刷新、重开都在。数据只存在你自己的浏览器里。
-
-## 实现
-
-- 纯客户端插件，Host 半边空的（`index.js` 一个空 `apply`）。
-- 一个模块级 store（`state` + `Set` 监听器）配 `useSyncExternalStore`；写入防抖 300ms，收起面板与 `pagehide` 时立即落盘。
-- 页面、回收站、视图、缩放全在同一份 JSON 里，一次写入落全。
-- **图片不在这份 JSON 里**：页面只记 `{ id, w, h, dw }`，字节单独存 `dsh-mini-notes.img.<id>`。所以打字永远只重写几百字节；data URL 在内存里另有一层缓存，渲染不碰存储。
-- **正文是 `contenteditable`（文档式），但存储是纯文本**：一张图对应一个占位字符 `\uFFFC`，`images` 数组按出现顺序对应。存下来没有 HTML、没有 base64、没有 XSS 面；打开时按标记重建 DOM。
-- **光标**只跟踪「文本偏移量」这一个数字，跨渲染不保留 DOM Range。只在内容真的与存储不一致时才重建 DOM，拖边缩放完全不碰 DOM。
-- 两个槽位：`conversation.session.header.utilities`（按钮）、`shell.overlay`（面板）。面板收起时组件返回 `null`，不产生额外 DOM 与渲染；按钮只订阅一个布尔值。
-- 样式只用主题 token（`--dsw-alias-*`、`--dsw-radius-*`、`--dsw-elevation-*`），跟随亮/暗色。
-
-### 已知限制
-- 只做「文字 + 行内图」，没有加粗/列表/标题等富文本格式。
-- 图片受 localStorage 5MB 限制；要放更多大图需换 IndexedDB。
-- 图片不能插在文字中间——插入点在光标处，但图片是块级元素（独占一行）。
-
-## 文件
-
-| 文件 | 作用 |
-|---|---|
-| `package.json` | 包清单；`dsh.bundle.patch` + `dsh.client` 双半声明 |
-| `cordis.patch.yml` | 插入一行 Host 插件（唯一作用是把包挂进组合） |
-| `index.js` | Host 半边：空实现 |
-| `client.js` | 浏览器半边：store、按钮、面板、编辑器、样式、槽位注册 |
-| `locale/{zh,en}.json` | 插件管理页的标题与描述 |
-| `icon.svg` | 插件图标 |
-| `.smoke/harness.mjs.cjs` | 离线行为自检（假 DOM + 假 React，不是真浏览器） |
-
-## 安装
+## Install
 
 ```bash
-dsh plugin --profile <你的 profile> add /path/to/dsh-mini-notes
+dsh plugin --profile web add github:IVseIce/dsh-mini-notes
 ```
 
-或在 DSH Web 的插件管理页安装本目录。
+Any pnpm-installable form also works:
+
+```bash
+# pin a commit (recommended for reviewing third-party code first)
+dsh plugin --profile web add github:IVseIce/dsh-mini-notes#<commit-sha>
+
+# full git URL
+dsh plugin --profile web add git+https://github.com/IVseIce/dsh-mini-notes.git
+
+# from a local checkout, for development
+dsh plugin --profile web add link:/absolute/path/to/dsh-mini-notes
+```
+
+Or install this directory from the **Plugin manager** page in the DSH Web UI.
+
+Restart, or let HMR pick it up, then refresh the page. The notes button appears at the right of the session header, next to the other utilities.
+
+## Usage
+
+### Panel
+- **Open / close** — click the notes icon at the right of the session header; click again to hide.
+- **Placement** — opens just below the button the first time; afterwards it remembers where you dragged it and how big you resized it.
+- **Drag** — hold the empty part of the tab bar.
+- **Resize** — drag the small triangle in the bottom-right corner (min 280×220, always kept inside the window).
+- **Pin** (pushpin) — a pinned panel stays open when you click elsewhere, handy for typing while reading the conversation. An unpinned panel closes on any outside click, and `Esc` also hides it.
+
+### Pages
+- Browser-style tabs across the top; a tab's title is the first line of that page.
+- `+` sits **after the last tab** (like Windows Notepad). Tabs shrink evenly as they multiply (down to 46px, titles ellipsized) and only start scrolling when even that is not enough.
+- **Drag a tab to reorder it** — drag left or right and release. A plain click still just switches pages.
+- The `×` on a tab **closes** the page into the trash — it does not destroy it.
+
+### Zoom
+`−` / percentage / `+` in the tools row scales the page content — text and images together (70%–250%). Click the percentage to return to 100%. Window chrome (tab bar, footer) does not scale. Your zoom level is remembered.
+
+### Images
+- Two ways in: **drag a file onto the panel**, or **paste** into the text. The image is inserted at the caret and shown at its natural aspect ratio — default width is `min(panel width − 48, 1600px)`, capped at 520px, so text inside screenshots stays readable.
+- **Drag an image's left or right edge to resize** it (60px up to panel width − 40). Stored pixels never change, so enlarging stays sharp, and the caret never jumps.
+- **Click an image to select it** (blue outline), then press `Backspace` or `Delete` to remove it. Click elsewhere or press `Esc` to deselect.
+- Images are compressed on the way in: longest edge 1600px, WebP quality 0.82 — a typical screenshot lands around 100–300 KB.
+- `localStorage` gives roughly 5 MB, so expect 15–25 images. When it is full the footer shows a red "image too large to save" message — nothing is dropped silently.
+- Images belong to their page: closing a page into the trash carries them along, restoring brings them back, and bytes are only released when you delete the page permanently or empty the trash.
+
+### Trash
+The bin icon in the tools row.
+- Click a row to **restore** that page; the `×` at the end of a row deletes it permanently (the confirmation appears inside the panel, never a browser dialog); **Empty trash** in the footer clears everything at once.
+- Closing every tab does not make the window vanish — it stays on the trash, so a closed page never feels lost.
+- Keeps up to 2000 entries, dropping the oldest first.
+
+### Storage
+Everything is saved to your browser's `localStorage` (`dsh-mini-notes.v2`) 0.3 s after you stop typing, and again when the panel closes. Refresh or reopen the page and it is all still there. **Your data never leaves your browser** — no account, no sync, no request.
+
+## How it works
+
+- Purely client-side. The Host half (`index.js`) is an empty `apply`.
+- One module-level store (a `state` object plus a `Set` of listeners) consumed through `useSyncExternalStore`. Writes are debounced 300 ms and flushed immediately when the panel closes and on `pagehide`.
+- Pages, trash, view and zoom live in **one JSON object**, written in a single pass.
+- **Image bytes are not in that object.** A page only records `{ id, w, h, dw }`; the bytes live under `dsh-mini-notes.img.<id>`. Typing therefore rewrites a few hundred bytes, never megabytes. Data URLs are additionally cached in memory, so rendering never touches storage.
+- **The body is a `contenteditable` document editor, but storage is plain text.** Each image is exactly one placeholder character (`\uFFFC`), and the `images` array describes them in document order. Nothing HTML-ish, no base64 in the text, no XSS surface — the DOM is rebuilt from the markers on load.
+- **The caret is tracked as a single text offset**, never as a DOM range across renders. The DOM is only rebuilt when it actually disagrees with stored state; dragging an image edge touches numbers only and never the DOM.
+- Two slots: `conversation.session.header.utilities` (the button) and `shell.overlay` (the panel). While closed the panel component returns `null`, so it costs no DOM and no rendering; the button subscribes to a single boolean.
+- Styling uses theme tokens only (`--dsw-alias-*`, `--dsw-radius-*`, `--dsw-elevation-*`), so it follows light and dark themes.
+
+### Known limits
+
+- Text plus inline images only — no bold, lists, or headings.
+- Images are bounded by the ~5 MB `localStorage` quota; more or larger images would need IndexedDB.
+- Images are block-level: they insert at the caret, but occupy their own line.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `package.json` | Manifest; declares both halves via `dsh.bundle.patch` and `dsh.client` |
+| `cordis.patch.yml` | Inserts one Host row (its only job is mounting the package) |
+| `index.js` | Host half: empty |
+| `client.js` | Browser half: store, button, panel, editor, styles, slot registrations |
+| `locale/{zh,en}.json` | Titles and descriptions for the plugin manager |
+| `icon.svg` | Plugin icon |
+| `.smoke/harness.mjs.cjs` | Offline behaviour check (fake DOM + fake React, not a real browser) |
+
+## Development
+
+No build step — edit `client.js` and reload.
+
+Run the offline check:
+
+```bash
+node .smoke/harness.mjs.cjs client.js
+```
+
+It stubs a DOM, React and storage, then drives the real client code through opening, typing, tabs, drag-to-reorder, images, zoom, trash and reload. It is a behavioural check, not a browser.
+
+## License
+
+MIT
