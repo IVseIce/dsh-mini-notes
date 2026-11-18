@@ -887,6 +887,48 @@ const byClass = (root, cls) => {
     assert.ok(saved.zoom < 1, 'zoom is persisted')
   }
 
+  // Regression: after an image update (which repaints the editor), one Enter
+  // must still produce one newline. The original readDom() trimmed a trailing
+  // "\n", so the stored text and the DOM disagreed forever, and the Enter that
+  // produced the newline was immediately undone — users had to press it twice.
+  {
+    storage.set('dsh-mini-notes.v2', JSON.stringify({
+      v: 2, notes: [{ id: 1, text: '', images: [] }], activeId: 1, seq: 1,
+      open: true, pinned: true, box: { x: 40, y: 60, w: 400, h: 460 },
+      trash: [], view: 'note', zoom: 1
+    }))
+    const rp = loadFresh()
+    const ed = rp.panel.querySelector('.mn-editor')
+    typeInto(ed, 'aaa')
+    await settled()
+
+    // Paste an image — this is what forces the repaint.
+    ed.listeners.paste[0]({
+      clipboardData: { files: [{ type: 'image/png', name: 'a.png' }], items: [] },
+      preventDefault() {}
+    })
+    await settled()
+    let st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(st.notes[0].images.length, 1, 'image attached')
+
+    // Repaint happens on the next render (as an image update does).
+    const painted = mount(registered.get('mini-notes-layer').component).tree
+    await settled()
+    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    const before = st.notes[0].text
+
+    // ONE Enter, on the freshly repainted editor.
+    const ed2 = painted.querySelector('.mn-editor')
+    ed2.listeners.keydown[0]({ key: 'Enter', preventDefault() {} })
+    await settled()
+    st = JSON.parse(storage.get('dsh-mini-notes.v2'))
+    assert.strictEqual(
+      st.notes[0].text,
+      before + '\n',
+      `one Enter after a repaint adds one newline (was ${JSON.stringify(before)}, now ${JSON.stringify(st.notes[0].text)})`
+    )
+  }
+
   // Regression: Enter must insert a line break, not truncate the page.
   // The editor originally captured a page snapshot at build time, so the second
   // edit was computed against stale text and the current line got overwritten.

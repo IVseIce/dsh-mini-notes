@@ -1488,8 +1488,11 @@ window.__ModuleLoader__.load({
           if (block && out.length > before && !out.endsWith('\n')) out += '\n'
         }
         for (const child of Array.from(root.childNodes)) walk(child)
-        // Our own trailing block newlines are an artifact of the layout, not text.
-        return out.replace(/\n$/, '')
+        // Do NOT trim a trailing newline: a page ending in "\n" renders as a
+        // trailing <br>, and trimming here made that Enter look like a no-op
+        // (users had to press it twice). Any trailing newline a block wrapper
+        // added is already excluded by the block rule above.
+        return out
       }
 
       /** Build the DOM for a page, restoring the caret if we own the focus. */
@@ -1693,7 +1696,9 @@ window.__ModuleLoader__.load({
         if (files.length > 0) {
           event.preventDefault()
           const at = readCaret()
-          caret.offset = at
+          // The image becomes one placeholder character at `at`; keep the caret
+          // after it so the next keystroke continues after the picture.
+          caret.offset = at + files.length
           report(attachImages(pageId, files, at))
           return
         }
